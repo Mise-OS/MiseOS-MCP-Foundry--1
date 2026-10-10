@@ -200,7 +200,7 @@ jobs:
           } >> "$REPORT"
 
           if [[ -n "${AUGMENT_SESSION_AUTH:-}" ]]; then
-            npm install -g @augmentcode/auggie >/dev/null 2>&1
+            env -u GH_TOKEN -u GITHUB_API_TOKEN -u AUGMENT_SESSION_AUTH npm install -g @augmentcode/auggie >/dev/null 2>&1
             {
               echo "Review this repository status as a Mise repo steward."
               echo "Focus on issues, PR risks, test failures, branch flow, and next precise action."
@@ -217,15 +217,25 @@ jobs:
           fi
 
       - name: Comment report on issue or PR
-        if: env.TARGET_NUMBER != ''
+        if: ${{ always() && env.TARGET_NUMBER != '' }}
         run: |
           set -euo pipefail
-          ISSUES_ENABLED="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')"
-          case "$ISSUES_ENABLED" in
-            true) gh issue comment "$TARGET_NUMBER" --body-file MISE_AGENT_REPORT.md ;;
-            false) echo "Issues are disabled; review report retained as an Actions artifact." ;;
-            *) echo "Unexpected has_issues response: $ISSUES_ENABLED" >&2; exit 1 ;;
-          esac
+          if [[ ! -s MISE_AGENT_REPORT.md ]]; then
+            echo "Review report unavailable; preceding step failed before generating it." >&2
+            exit 1
+          fi
+
+          # Pull-request comments are supported even when repository Issues are disabled.
+          if gh pr view "$TARGET_NUMBER" --json number --jq '.number' >/dev/null 2>&1; then
+            gh pr comment "$TARGET_NUMBER" --body-file MISE_AGENT_REPORT.md
+          else
+            ISSUES_ENABLED="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')"
+            case "$ISSUES_ENABLED" in
+              true) gh issue comment "$TARGET_NUMBER" --body-file MISE_AGENT_REPORT.md ;;
+              false) echo "Issues are disabled; non-PR review report retained as an Actions artifact." ;;
+              *) echo "Unexpected has_issues response: $ISSUES_ENABLED" >&2; exit 1 ;;
+            esac
+          fi
 
       - name: Upload report artifact
         if: always()
