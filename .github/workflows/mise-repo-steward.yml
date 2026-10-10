@@ -140,8 +140,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
 
       - name: Generate repo review report
         run: |
@@ -159,7 +157,16 @@ jobs:
             echo "## Build gate"
           } >> "$REPORT"
 
-          if [[ -f package-lock.json ]]; then npm ci >> "$REPORT" 2>&1; else npm install >> "$REPORT" 2>&1; fi
+          GATE_FAILED=0
+          if [[ ! -f package.json ]]; then
+            echo "NOT RUN: npm dependency/build/test/typecheck/lint gates — no package.json at repository root." >> "$REPORT"
+          elif [[ ! -f package-lock.json ]]; then
+            echo "FAIL: package.json exists but package-lock.json is missing; reproducible npm ci cannot run." >> "$REPORT"
+            GATE_FAILED=1
+          elif ! env -u GH_TOKEN -u GITHUB_API_TOKEN -u AUGMENT_SESSION_AUTH npm ci >> "$REPORT" 2>&1; then
+            echo "FAIL: npm ci did not complete." >> "$REPORT"
+            GATE_FAILED=1
+          fi
 
           run_gate() {
             local label="$1"
@@ -171,15 +178,18 @@ jobs:
               echo "✅ $label passed" >> "$REPORT"
             else
               echo "❌ $label failed with exit code $code" >> "$REPORT"
+              GATE_FAILED=1
             fi
             echo >> "$REPORT"
             return 0
           }
 
-          run_gate "typecheck" npm run typecheck --if-present
-          run_gate "test" npm test --if-present
-          run_gate "build" npm run build --if-present
-          run_gate "lint" npm run lint --if-present
+          if [[ -f package.json && -f package-lock.json && "$GATE_FAILED" -eq 0 ]]; then
+            run_gate "typecheck" env -u GH_TOKEN -u GITHUB_API_TOKEN -u AUGMENT_SESSION_AUTH npm run typecheck --if-present
+            run_gate "test" env -u GH_TOKEN -u GITHUB_API_TOKEN -u AUGMENT_SESSION_AUTH npm test --if-present
+            run_gate "build" env -u GH_TOKEN -u GITHUB_API_TOKEN -u AUGMENT_SESSION_AUTH npm run build --if-present
+            run_gate "lint" env -u GH_TOKEN -u GITHUB_API_TOKEN -u AUGMENT_SESSION_AUTH npm run lint --if-present
+          fi
 
           {
             echo "## Git signal"
@@ -201,18 +211,29 @@ jobs:
           else
             cp "$REPORT" MISE_AGENT_REPORT.md
           fi
+          if [[ "$GATE_FAILED" -ne 0 ]]; then
+            echo "Build/test gate failures recorded in report." >&2
+            exit 1
+          fi
 
       - name: Comment report on issue or PR
         if: env.TARGET_NUMBER != ''
         run: |
           set -euo pipefail
-          gh issue comment "$TARGET_NUMBER" --body-file MISE_AGENT_REPORT.md
+          ISSUES_ENABLED="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')"
+          case "$ISSUES_ENABLED" in
+            true) gh issue comment "$TARGET_NUMBER" --body-file MISE_AGENT_REPORT.md ;;
+            false) echo "Issues are disabled; review report retained as an Actions artifact." ;;
+            *) echo "Unexpected has_issues response: $ISSUES_ENABLED" >&2; exit 1 ;;
+          esac
 
       - name: Upload report artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mise-issues-review
           path: MISE_AGENT_REPORT.md
+          if-no-files-found: error
 
   merge_pr:
     name: 02 Merge and PR steward
@@ -236,8 +257,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
 
       - name: Validate and merge PR only when gated
         run: |
