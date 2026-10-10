@@ -534,9 +534,30 @@ jobs:
             gh label create "mise:branch-flow" --color "0e8a16" --description "Branch flow or merge-order recommendation" || true
           fi
 
-          EXISTING="$(gh issue list --state open --search 'Mise Repo Health Report in:title' --json number -q '.[0].number // empty')"
-          if [[ -n "$EXISTING" ]]; then
-            gh issue comment "$EXISTING" --body-file "$REPORT"
-          else
-            gh issue create --title "Mise Repo Health Report" --body-file "$REPORT" --label "mise:steward" || gh issue create --title "Mise Repo Health Report" --body-file "$REPORT"
-          fi
+          # Check capability explicitly; API errors must fail rather than silently bypass reporting.
+          ISSUES_ENABLED="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues')"
+          case "$ISSUES_ENABLED" in
+            true)
+              EXISTING="$(gh issue list --state open --search 'Mise Repo Health Report in:title' --json number -q '.[0].number // empty')"
+              if [[ -n "$EXISTING" ]]; then
+                gh issue comment "$EXISTING" --body-file "$REPORT"
+              else
+                gh issue create --title "Mise Repo Health Report" --body-file "$REPORT" --label "mise:steward" || gh issue create --title "Mise Repo Health Report" --body-file "$REPORT"
+              fi
+              ;;
+            false)
+              echo "Repository Issues disabled; report retained as Actions artifact." >> "$REPORT"
+              ;;
+            *)
+              echo "Unexpected has_issues response: $ISSUES_ENABLED" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Upload health report artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mise-repo-health
+          path: MISE_REPO_HEALTH.md
+          if-no-files-found: error
