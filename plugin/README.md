@@ -8,7 +8,7 @@ Copy `plugin/` into a Claude Code plugins directory, or clone this repository an
 
 ## Skills
 
-- **capability-gateway** — allow / hold / deny for inspect, plan, execute, PR, guard, push, release. Emits `miseos.capability-gateway.cycle.v1` audit records.
+- **capability-gateway** — allow / hold / deny for inspect, plan, execute, PR, guard, push, release
 - **repo-steward** — ingest → plan → approve → execute. Auto-push is off.
 
 ## MCP
@@ -19,10 +19,5 @@ Tools:
 
 - `capability_list`
 - `capability_invoke`
-- `capability_cycle`
-
-Schema: `plugin/schemas/gateway-cycle.schema.json`
-
-Unknown quantities stay `null`. Writes hold until a human signs the pass. `push` is denied in v1.
 
 The kitchen Foundry app hosts the live tools (`repo_ingest`, `agent_plan`, `github_create_pr`, `guard_repo`).
